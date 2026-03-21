@@ -1,0 +1,56 @@
+---
+# registry — Harbor container registry
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: registry
+  labels:
+    team: platform
+    security-zone: internal
+---
+# identity — Keycloak OIDC provider
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: identity
+  labels:
+    team: platform
+    security-zone: internal
+---
+# kyverno — Policy engine + Cosign image verification admission webhook
+# NOTE: Kyverno's Helm chart creates this namespace automatically,
+# but we pre-create and label it so network policies can reference it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kyverno
+  labels:
+    team: platform
+    security-zone: system
+---
+# monitoring — Prometheus + Grafana
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    team: platform
+    security-zone: internal
+---
+# team-alpha — example workload namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-alpha
+  labels:
+    team: alpha
+    security-zone: workload
+---
+# team-beta — example workload namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: team-beta
+  labels:
+    team: beta
+    security-zone: workload
