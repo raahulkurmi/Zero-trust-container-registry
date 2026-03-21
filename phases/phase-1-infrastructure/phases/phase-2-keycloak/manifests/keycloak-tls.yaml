@@ -1,0 +1,15 @@
+# TLS certificate for Keycloak
+# Issued by our local CA (ztcr-ca-issuer) created in Phase 1
+# Stored as secret: keycloak-tls-secret in identity namespace
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: keycloak-tls
+  namespace: identity
+spec:
+  secretName: keycloak-tls-secret
+  dnsNames:
+    - auth.ztcr.local
+  issuerRef:
+    name: ztcr-ca-issuer
+    kind: ClusterIssuer

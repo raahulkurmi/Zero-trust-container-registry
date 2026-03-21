@@ -1,0 +1,31 @@
+---
+# Keycloak Ingress
+# Routes https://auth.ztcr.local → keycloak service in identity namespace
+# NGINX terminates TLS using keycloak-tls-secret (signed by our ztcr-ca-issuer)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: keycloak-ingress
+  namespace: identity
+  annotations:
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-buffer-size: "128k"
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "4"
+    nginx.ingress.kubernetes.io/use-forwarded-headers: "true"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - auth.ztcr.local
+      secretName: keycloak-tls-secret
+  rules:
+    - host: auth.ztcr.local
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: keycloak
+                port:
+                  number: 80
