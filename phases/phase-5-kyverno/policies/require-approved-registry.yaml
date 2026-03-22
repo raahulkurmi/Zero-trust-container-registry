@@ -1,0 +1,30 @@
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-approved-registry
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: require-approved-registry
+      match:
+        any:
+          - resources:
+              kinds:
+                - Pod
+      exclude:
+        any:
+          - resources:
+              namespaces:
+                - kyverno
+                - monitoring
+                - kube-system
+                - cert-manager
+                - ingress-nginx
+                - identity
+                - registry
+      validate:
+        message: "Images must be from registry.ztcr.local:8443 only."
+        pattern:
+          spec:
+            containers:
+              - image: "registry.ztcr.local:8443/*"

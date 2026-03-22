@@ -1,98 +1,250 @@
 # Zero Trust Container Registry (ZTCR)
 
-A production-grade, end-to-end zero trust container registry built entirely on open-source tools. Every image push, pull, and Kubernetes deployment is gated by identity — no anonymous access, no implicit trust.
+A production-grade, end-to-end implementation of a zero trust container registry on Kubernetes. Every image push, pull, and deployment is gated by identity — no anonymous access, no implicit trust.
+
+![Architecture](docs/architecture.png)
+
+## Stack
+
+| Component | Role | Version |
+|---|---|---|
+| **K3d** | Lightweight Kubernetes (local) | v1.33.6 |
+| **Harbor** | Container Registry | v2.14.3 |
+| **Keycloak** | Identity Provider (OIDC) | v26.0.0 |
+| **Cosign** | Image Signing & Verification | v3.0.5 |
+| **Kyverno** | Kubernetes Policy Engine | v1.17.1 |
+| **Trivy** | Vulnerability Scanning (built into Harbor) | latest |
+| **cert-manager** | TLS Certificate Management | v1.x |
+| **NGINX Ingress** | Ingress Controller | latest |
+
+---
+
+## What is Zero Trust?
+
+Traditional security: "Everything inside the network is trusted."
+
+Zero Trust: "Never trust, always verify — regardless of where the request comes from."
+
+In container registry context:
+- Every human login goes through Keycloak OIDC — no local passwords
+- Every CI/CD pipeline uses scoped robot accounts — least privilege
+- Every image is cryptographically signed with Cosign — no unsigned images run
+- Every image is scanned by Trivy — no HIGH/CRITICAL CVEs allowed
+- Every Kubernetes pod is validated by Kyverno — policy as code
+
+---
 
 ## Architecture
 
 ```
-Developer ──OIDC──► Keycloak ──JWT──► Harbor Registry
-                        │
-CI/CD Bot ──Robot──► Harbor ──Cosign──► Signed Image
-                                              │
-K8s Pod ──ServiceAccount──► Kyverno ◄─────────┘
-                               │
-                    ✅ Allow / ❌ Deny
+Developer
+    │ OIDC login
+    ▼
+Keycloak (Identity Provider)
+    │ JWT with groups claim
+    ▼
+Harbor (Container Registry)
+    │ RBAC based on groups
+    ├── team-alpha project
+    └── team-beta project
+         │
+         │ Trivy scans every image
+         │ Cosign signs every image
+         ▼
+Kubernetes (K3d)
+    │
+    ▼
+Kyverno (Admission Controller)
+    ├── Block :latest tag
+    ├── Block non-approved registry
+    └── Block unsigned images
+         │
+         ▼
+    Pod runs ✅ or blocked ❌
 ```
 
-## Stack
+---
 
-| Component | Role |
-|---|---|
-| [K3d](https://k3d.io) | K3s in Docker — local Kubernetes |
-| [Harbor](https://goharbor.io) | Container registry with RBAC + vulnerability scanning |
-| [Keycloak](https://www.keycloak.org) | OIDC Identity Provider |
-| [Cosign](https://docs.sigstore.dev/cosign) | Image signing and verification |
-| [Kyverno](https://kyverno.io) | Policy engine with native Cosign admission control |
-| [Trivy](https://trivy.dev) | Vulnerability scanning (built into Harbor) |
-| [Prometheus + Grafana](https://prometheus.io) | Observability and alerting |
+## Zero Trust Decision Points
 
-> **Why Kyverno over OPA Gatekeeper?**
-> Kyverno policies are pure Kubernetes YAML — no Rego, no extra language.
-> It has native Cosign image verification built in: one `ClusterPolicy` enforces
-> signed images without any sidecar or external webhook plumbing.
-
-## Implementation Phases
-
-| Phase | Topic | Status |
+| Action | Who | How |
 |---|---|---|
-| [Phase 1](./phases/phase-1-infrastructure/) | Infrastructure Setup | 🔲 Not Started |
-| [Phase 2](./phases/phase-2-keycloak/) | Keycloak Identity Provider | 🔲 Not Started |
-| [Phase 3](./phases/phase-3-harbor/) | Harbor Registry + OIDC | 🔲 Not Started |
-| [Phase 4](./phases/phase-4-cosign/) | Image Signing with Cosign | 🔲 Not Started |
-| [Phase 5](./phases/phase-5-kyverno/) | Kyverno Policy Engine | 🔲 Not Started |
-| [Phase 6](./phases/phase-6-admission-control/) | Admission Control via Kyverno | 🔲 Not Started |
-| [Phase 7](./phases/phase-7-observability/) | Observability and Hardening | 🔲 Not Started |
+| Push image | CI/CD robot account | Harbor RBAC |
+| Scan image | Trivy | Auto-scan on push |
+| Sign image | Cosign private key | CI/CD pipeline |
+| Pull image (human) | Keycloak OIDC | JWT groups claim |
+| Pull image (K8s) | imagePullSecret | Robot account per namespace |
+| Deploy pod | Kyverno | Policy enforcement |
 
-## Local Environment
+---
 
-- **OS:** macOS (Apple Silicon or Intel)
-- **Runtime:** Docker Desktop + K3d (K3s in Docker)
-- **Domains:** `registry.ztcr.local`, `auth.ztcr.local`, `grafana.ztcr.local`
-- **DNS:** `/etc/hosts` entries pointing to `127.0.0.1`
-
-## Quick Start
-
-```bash
-# 1. Install tools
-brew install k3d kubectl helm cosign
-
-# 2. Create cluster
-k3d cluster create ztcr-cluster \
-  --servers 1 --agents 2 \
-  --port "80:80@loadbalancer" \
-  --port "443:443@loadbalancer" \
-  --k3s-arg "--disable=traefik@server:0" \
-  --wait
-
-# 3. Run Phase 1 bootstrap
-cd phases/phase-1-infrastructure
-chmod +x scripts/bootstrap.sh
-./scripts/bootstrap.sh
-```
-
-→ Full guide: [Phase 1 README](./phases/phase-1-infrastructure/README.md)
-
-## Repository Structure
+## Project Structure
 
 ```
 zero-trust-container-registry/
-├── README.md
-├── .gitignore
+├── phases/
+│   ├── phase-1-infrastructure/
+│   │   ├── manifests/
+│   │   │   ├── namespaces.yaml
+│   │   │   ├── cert-manager-issuer.yaml
+│   │   │   └── network-policies.yaml
+│   │   └── scripts/
+│   │       └── bootstrap.sh
+│   ├── phase-2-keycloak/
+│   │   ├── manifests/
+│   │   │   ├── keycloak-deployment.yaml
+│   │   │   ├── keycloak-postgres.yaml
+│   │   │   ├── keycloak-ingress.yaml
+│   │   │   └── keycloak-tls.yaml
+│   │   └── scripts/
+│   │       └── setup-keycloak.sh
+│   ├── phase-3-harbor/
+│   │   ├── harbor-values.yaml
+│   │   ├── manifests/
+│   │   │   └── harbor-tls.yaml
+│   │   └── scripts/
+│   │       └── setup-harbor.sh
+│   ├── phase-4-cosign/
+│   │   └── keys/
+│   │       └── cosign.pub   ← public key only (private key in .gitignore)
+│   ├── phase-5-kyverno/
+│   │   └── policies/
+│   │       ├── block-latest-tag.yaml
+│   │       ├── require-approved-registry.yaml
+│   │       └── require-signed-images.yaml
+│   └── phase-6-observability/
+│       └── monitoring-values.yaml
 ├── docs/
 │   └── architecture.md
-└── phases/
-    ├── phase-1-infrastructure/
-    │   ├── README.md
-    │   ├── scripts/
-    │   │   └── bootstrap.sh
-    │   └── manifests/
-    │       ├── namespaces.yaml
-    │       ├── cert-manager-issuer.yaml
-    │       └── network-policies.yaml
-    ├── phase-2-keycloak/          ← added in Phase 2
-    ├── phase-3-harbor/            ← added in Phase 3
-    ├── phase-4-cosign/            ← added in Phase 4
-    ├── phase-5-kyverno/           ← added in Phase 5
-    ├── phase-6-admission-control/ ← added in Phase 6
-    └── phase-7-observability/     ← added in Phase 7
+├── PROGRESS.md
+├── .gitignore
+└── README.md
 ```
+
+---
+
+## Quick Start
+
+### Prerequisites
+- macOS with Docker Desktop (8GB+ RAM)
+- `k3d`, `kubectl`, `helm`, `cosign` installed
+
+```bash
+brew install k3d kubectl helm cosign
+```
+
+### 1. Create Cluster
+
+```bash
+k3d cluster create ztcr-cluster \
+  --servers 1 --agents 2 \
+  --port "8443:443@loadbalancer" \
+  --port "8080:80@loadbalancer"
+```
+
+### 2. Add DNS entries
+
+```bash
+echo "127.0.0.1 auth.ztcr.local registry.ztcr.local grafana.ztcr.local" | sudo tee -a /etc/hosts
+```
+
+### 3. Run Phase 1 bootstrap
+
+```bash
+chmod +x phases/phase-1-infrastructure/scripts/bootstrap.sh
+./phases/phase-1-infrastructure/scripts/bootstrap.sh
+```
+
+### 4. Deploy Keycloak
+
+```bash
+kubectl apply -f phases/phase-2-keycloak/manifests/keycloak-postgres.yaml
+kubectl apply -f phases/phase-2-keycloak/manifests/keycloak-deployment.yaml
+kubectl apply -f phases/phase-2-keycloak/manifests/keycloak-ingress.yaml
+./phases/phase-2-keycloak/scripts/setup-keycloak.sh
+```
+
+### 5. Deploy Harbor
+
+```bash
+helm upgrade --install harbor harbor/harbor \
+  --namespace registry \
+  -f phases/phase-3-harbor/harbor-values.yaml
+./phases/phase-3-harbor/scripts/setup-harbor.sh
+```
+
+### 6. Sign an image
+
+```bash
+docker push registry.ztcr.local:8443/team-alpha/my-app:v1
+cosign sign --key phases/phase-4-cosign/keys/cosign.key \
+  registry.ztcr.local:8443/team-alpha/my-app:v1
+```
+
+### 7. Apply Kyverno policies
+
+```bash
+kubectl apply -f phases/phase-5-kyverno/policies/
+```
+
+---
+
+## Kyverno Policies in Action
+
+### Block :latest tag
+```bash
+kubectl run test --image=nginx:latest -n team-alpha
+# Error: :latest tag is not allowed. Use a specific version tag.
+```
+
+### Block unauthorized registry
+```bash
+kubectl run test --image=docker.io/nginx:1.25 -n team-alpha
+# Error: Images must be from registry.ztcr.local:8443 only.
+```
+
+### Block unsigned images
+```bash
+kubectl run test --image=registry.ztcr.local:8443/team-alpha/unsigned:v1 -n team-alpha
+# Error: Image signature verification failed.
+```
+
+---
+
+## Robot Account Strategy
+
+| Robot | Namespace | Permissions |
+|---|---|---|
+| `robot$team-alpha+team-alpha-ci` | team-alpha | push + pull |
+| `robot$team-alpha+team-alpha-argocd` | team-alpha | pull only |
+| `robot$team-beta+team-beta-ci` | team-beta | push + pull |
+
+### Attach to Kubernetes namespace
+
+```bash
+kubectl create secret docker-registry harbor-pull-secret \
+  --namespace team-alpha \
+  --docker-server=registry.ztcr.local:8443 \
+  --docker-username="robot\$team-alpha+team-alpha-argocd" \
+  --docker-password="<SECRET>"
+
+kubectl patch serviceaccount default \
+  --namespace team-alpha \
+  -p '{"imagePullSecrets": [{"name": "harbor-pull-secret"}]}'
+```
+
+---
+
+## Lessons Learned
+
+- **Keycloak H2 database** loses data on restart — always use PostgreSQL in production
+- **Port mismatch**: K3d exposes `:8443` externally but internally NGINX listens on `:443` — CoreDNS customhosts needed
+- **CA trust**: Every component (Harbor, Kyverno) needs the self-signed CA mounted explicitly
+- **Kyverno image verification** requires registry to be reachable from within the cluster on the same port as the image reference
+- **OIDC issuer** must match exactly — `KC_HOSTNAME` + `KC_HOSTNAME_PORT` must align with what Harbor expects
+
+---
+
+## License
+
+MIT
